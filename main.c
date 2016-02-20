@@ -8,6 +8,11 @@
 #include <libopencm3/cm3/nvic.h>
 #include "systime.h"
 
+#define USB_TX_BUF_SIZE 128
+uint16_t usb_tx_buf[USB_TX_BUF_SIZE];
+int usb_tx_buf_used = 0;
+
+
 static const struct usb_device_descriptor dev = {
 	.bLength = USB_DT_DEVICE_SIZE,
 	.bDescriptorType = USB_DT_DEVICE,
@@ -143,9 +148,9 @@ static const struct usb_config_descriptor config = {
 };
 
 static const char * usb_strings[] = {
-	"Black Sphere Technologies",
-	"CDC-ACM Demo",
-	"DEMO",
+	"bytewerk Technologies",
+	"MDB USB Adapter",
+	"42",
 };
 
 /* Buffer to be used for control requests. */
@@ -211,18 +216,14 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 				cdcacm_control_request);
 }
 
-#define TXBUF_SIZE 128
-uint16_t txbuf[TXBUF_SIZE];
-int txbuf_used = 0;
-
 void usart2_isr(void)
 {
 
 	while (usart_get_flag(USART2, USART_SR_RXNE)) {
 
-		if (txbuf_used < TXBUF_SIZE) { // txbuf has space left?
+		if (usb_tx_buf_used < USB_TX_BUF_SIZE) { // txbuf has space left?
 			uint16_t ch = usart_recv(USART2) & 0x1FF;
-			txbuf[txbuf_used++] = ((ch & 0xFF)<<8) | ((ch>>8) & 0xFF);
+			usb_tx_buf[usb_tx_buf_used++] = ((ch & 0xFF)<<8) | ((ch>>8) & 0xFF);
 		} else {
 			usart_recv(USART2);
 		}
@@ -285,9 +286,9 @@ int main(void)
 	while (1) {
 
 		usart_disable_rx_interrupt(USART2);
-		if (txbuf_used>0) {
-			usbd_ep_write_packet(usbd_dev, 0x82, txbuf, txbuf_used*2);
-			txbuf_used = 0;
+		if (usb_tx_buf_used>0) {
+			usbd_ep_write_packet(usbd_dev, 0x82, usb_tx_buf, usb_tx_buf_used*2);
+			usb_tx_buf_used = 0;
 		}
 		usart_enable_rx_interrupt(USART2);
 
