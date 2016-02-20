@@ -5,6 +5,7 @@
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/cdc.h>
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/nvic.h>
 #include "systime.h"
 
 static const struct usb_device_descriptor dev = {
@@ -211,6 +212,24 @@ static void cdcacm_set_config(usbd_device *usbd_dev, uint16_t wValue)
 				cdcacm_control_request);
 }
 
+#define TXBUF_SIZE 128
+uint16_t txbuf[TXBUF_SIZE];
+int txbuf_used = 0;
+
+void usart2_isr(void)
+{
+
+	while (usart_get_flag(USART2, USART_SR_RXNE)) {
+
+		if (txbuf_used < TXBUF_SIZE) { // txbuf has space left?
+			uint16_t ch = usart_recv(USART2) & 0x1FF;
+			txbuf[txbuf_used++] = ((ch & 0xFF)<<8) | ((ch>>8) & 0xFF);
+		} else {
+			usart_recv(USART2);
+		}
+	}
+
+}
 
 int main(void)
 {
@@ -252,6 +271,8 @@ int main(void)
 	usart_set_mode(USART2, USART_MODE_TX_RX);
 	usart_set_parity(USART2, USART_PARITY_NONE);
 	usart_set_flow_control(USART2, USART_FLOWCONTROL_NONE);
+	nvic_enable_irq(NVIC_USART2_IRQ);
+	usart_enable_rx_interrupt(USART2);
 	usart_enable(USART2);
 
 	/* init usb */
@@ -264,20 +285,12 @@ int main(void)
 
 	while (1) {
 
-		uint8_t buf[64];
-		uint32_t flags = USART_SR(USART2);
-		while (usart_get_flag(USART2, USART_SR_RXNE)) {
-
-			int i;
-			for (i=0; i<sizeof(buf)-1; i+=2) {
-				if (!usart_get_flag(USART2, USART_SR_RXNE)) { break; }
-				 uint16_t data = usart_recv(USART2);
-				 buf[i] = data>>8;
-				 buf[i+1] = data & 0xFF;
-			}
-			usbd_ep_write_packet(usbd_dev, 0x82, buf, i);
-
+		usart_disable_rx_interrupt(USART2);
+		if (txbuf_used>0) {
+			usbd_ep_write_packet(usbd_dev, 0x82, txbuf, txbuf_used*2);
+			txbuf_used = 0;
 		}
+		usart_enable_rx_interrupt(USART2);
 
 		usbd_poll(usbd_dev);
 	}
