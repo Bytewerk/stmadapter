@@ -185,13 +185,12 @@ static void cdcacm_data_rx_cb(usbd_device *usbd_dev, uint8_t ep)
 	uint8_t buf[64];
 	int len = usbd_ep_read_packet(usbd_dev, 0x01, buf, 64);
 
-
 	for (int i=0; i<(len/2); i++) {
 		uint16_t val9bit = buf[2*i];
 		val9bit <<= 8;
 		val9bit |= (uint16_t)buf[2*i+1];
 		usart_send_blocking(USART2, val9bit);
-		delay_ms(2);
+		while ((USART_SR(USART2) & USART_SR_TC) == 0);
 	}
 
 }
